@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities{
+    .btn-primary{
+        @apply rounded-md border-2 border-primary bg-primary py-2 px-4 text-sm text-white transition-colors duration-200 hover:bg-primary/80;
+    }
+    .btn-outline{
+        @apply  rounded-md border-2 border-white px-4 py-2 text-sm text-white transition-colors duration-300;
+    }
+    .button-square{
+        @apply w-[50px] h-[50px] p-2 border-[1px] border-slate-300 rounded-md bg-gray-200 dark:bg-gray-900
+    }
+}
