@@ -1,193 +1,207 @@
-import React, { useState, useCallback } from 'react';
-import { Upload, Globe, Download, CheckCircle, XCircle, AlertTriangle, BarChart3, FileText, X } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import React, { useState } from 'react';
+import { Upload, Download, Globe, CheckCircle, XCircle, AlertTriangle, RefreshCw, FileText } from 'lucide-react';
 
 const WebsiteStatusChecker = () => {
   const [domains, setDomains] = useState([]);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
-  const [manualDomain, setManualDomain] = useState('');
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [summary, setSummary] = useState({ active: 0, inactive: 0, errors: 0, redirects: 0 });
 
-  // Status code mappings
-  const getStatusInfo = (status) => {
-    if (status >= 200 && status < 300) {
-      return { type: 'success', message: 'Site is Live', icon: CheckCircle };
-    } else if (status === 404) {
-      return { type: 'error', message: '404 Not Found', icon: XCircle };
-    } else if (status >= 500) {
-      return { type: 'error', message: 'Server Error', icon: XCircle };
-    } else if (status >= 400) {
-      return { type: 'warning', message: 'Client Error', icon: AlertTriangle };
-    } else if (status >= 300) {
-      return { type: 'warning', message: 'Redirect', icon: AlertTriangle };
-    } else {
-      return { type: 'error', message: 'Unknown Error', icon: XCircle };
-    }
-  };
+  // You can change this URL based on your server setup
+  const API_BASE_URL = 'http://65.2.57.231:5000';
 
-  // Check single domain status
   const checkDomainStatus = async (domain) => {
     try {
-      // Ensure domain has protocol
-      const url = domain.startsWith('http') ? domain : `https://${domain}`;
-      
-      // Using a CORS proxy for demonstration - in production, you'd need a backend
-      const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`);
-      const data = await response.json();
-      
-      if (data.status.http_code) {
-        return {
-          domain: domain,
-          status: data.status.http_code,
-          responseTime: Math.random() * 2000 + 500, // Simulated response time
-          timestamp: new Date().toISOString()
-        };
-      } else {
-        // Fallback for when we can't get actual status
-        return {
-          domain: domain,
-          status: response.ok ? 200 : 500,
-          responseTime: Math.random() * 2000 + 500,
-          timestamp: new Date().toISOString()
-        };
+      const response = await fetch(`${API_BASE_URL}/api/check-single`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ domain }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+
+      const result = await response.json();
+      return result;
     } catch (error) {
       return {
-        domain: domain,
-        status: 0,
-        error: error.message,
-        responseTime: 0,
-        timestamp: new Date().toISOString()
+        domain,
+        status: 'ERROR',
+        message: '❌ Connection Failed',
+        timestamp: new Date().toLocaleString(),
+        response_time: null
       };
     }
   };
 
-  // Process file upload
-  const handleFileUpload = useCallback((file) => {
-    const reader = new FileReader();
-    
-    reader.onload = (e) => {
-      try {
-        const data = e.target.result;
-        let parsedDomains = [];
-
-        if (file.name.endsWith('.csv')) {
-          // Parse CSV
-          const lines = data.split('\n');
-          parsedDomains = lines
-            .map(line => line.trim())
-            .filter(line => line && !line.toLowerCase().includes('domain') && !line.toLowerCase().includes('url'))
-            .map(line => line.split(',')[0].trim());
-        } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-          // Parse Excel
-          const workbook = XLSX.read(data, { type: 'binary' });
-          const sheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-          
-          parsedDomains = jsonData
-            .flat()
-            .filter(cell => cell && typeof cell === 'string' && cell.includes('.'))
-            .filter(domain => !domain.toLowerCase().includes('domain') && !domain.toLowerCase().includes('url'));
-        }
-
-        // Clean and validate domains
-        const cleanDomains = parsedDomains
-          .map(domain => domain.replace(/https?:\/\//, '').replace(/\/$/, ''))
-          .filter(domain => domain.includes('.') && domain.length > 3);
-
-        setDomains(prev => [...new Set([...prev, ...cleanDomains])]);
-      } catch (error) {
-        alert('Error parsing file. Please ensure it contains valid domain names.');
-      }
-    };
-
-    if (file.name.endsWith('.csv')) {
-      reader.readAsText(file);
-    } else {
-      reader.readAsBinaryString(file);
-    }
-  }, []);
-
-  // Handle drag and drop
-  const handleDrag = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
-  };
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    const files = Array.from(e.dataTransfer.files);
-    const validFile = files.find(file => 
-      file.name.endsWith('.csv') || file.name.endsWith('.xlsx') || file.name.endsWith('.xls')
-    );
-    
-    if (validFile) {
-      handleFileUpload(validFile);
-    } else {
-      alert('Please upload a CSV or Excel file.');
-    }
-  };
-
-  // Add manual domain
-  const addManualDomain = () => {
-    if (manualDomain.trim() && manualDomain.includes('.')) {
-      const cleanDomain = manualDomain.replace(/https?:\/\//, '').replace(/\/$/, '');
-      setDomains(prev => [...new Set([...prev, cleanDomain])]);
-      setManualDomain('');
-    }
-  };
-
-  // Check all domains
-  const checkAllDomains = async () => {
+  const checkBulkDomains = async () => {
     if (domains.length === 0) return;
-    
+
     setLoading(true);
     setResults([]);
-    
-    const batchSize = 5; // Process in batches to avoid overwhelming
-    const batches = [];
-    
-    for (let i = 0; i < domains.length; i += batchSize) {
-      batches.push(domains.slice(i, i + batchSize));
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/check-bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ domains }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setResults(data.results);
+      setSummary(data.summary);
+    } catch (error) {
+      console.error('Error checking domains:', error);
+      alert('Failed to check domains. Make sure your Python server is running.');
     }
-    
-    for (const batch of batches) {
-      const batchPromises = batch.map(checkDomainStatus);
-      const batchResults = await Promise.all(batchPromises);
-      setResults(prev => [...prev, ...batchResults]);
-      
-      // Small delay between batches
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
+
     setLoading(false);
   };
 
-  // Download results
+  const getStatusColor = (status) => {
+    if (typeof status === 'number') {
+      if (status >= 200 && status < 300) return 'text-green-600 bg-green-50';
+      if (status >= 300 && status < 400) return 'text-blue-600 bg-blue-50';
+      if (status >= 400 && status < 500) return 'text-red-600 bg-red-50';
+      if (status >= 500) return 'text-orange-600 bg-orange-50';
+    }
+    return 'text-gray-600 bg-gray-50';
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Check file size (limit to 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size too large. Please upload a file smaller than 5MB.');
+      event.target.value = '';
+      return;
+    }
+
+    setUploadLoading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+
+      const response = await fetch(`${API_BASE_URL}/file_upload`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+        mode: 'cors', // Explicitly set CORS mode
+        credentials: 'omit', // Don't send credentials
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to upload file';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorData.error || errorMessage;
+        } catch (e) {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      
+      if (!data.results || !Array.isArray(data.results)) {
+        throw new Error('Invalid response format from server');
+      }
+
+      // Transform the API response to match our component structure
+      const transformedResults = data.results.map(result => ({
+        domain: result.url ? result.url.replace(/^https?:\/\/(www\.)?/, '') : 'Unknown', // Clean domain name
+        status: result.status_code || 'Unknown',
+        message: result.message || 'No message',
+        response_time: result.response_time_sec || null,
+        timestamp: data.processed_at || new Date().toLocaleString(),
+        category: result.category || 'unknown'
+      }));
+
+      const extractedDomains = transformedResults.map(r => r.domain);
+      
+      // Update summary based on the new API response format
+      const newSummary = {
+        active: data.category_counts?.active || 0,
+        inactive: 0, // Not provided in new API
+        errors: data.category_counts?.error || 0,
+        redirects: 0 // Not provided in new API
+      };
+
+      setDomains(extractedDomains);
+      setResults(transformedResults);
+      setSummary(newSummary);
+
+      alert(`Successfully processed ${data.results.length} URLs. Active: ${newSummary.active}, Errors: ${newSummary.errors}`);
+      
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      
+      let errorMessage = 'Failed to upload and process file';
+      
+      if (error.name === 'AbortError') {
+        errorMessage = 'Request timed out. The file is too large or contains too many URLs. Try with a smaller file.';
+      } else if (error.message.includes('fetch')) {
+        errorMessage = 'Cannot connect to server. Please check if the server is running and accessible.';
+      } else {
+        errorMessage = error.message;
+      }
+      
+      alert(`Error: ${errorMessage}`);
+    }
+
+    setUploadLoading(false);
+    event.target.value = '';
+  };
+
+  const addManualDomain = () => {
+    const domain = document.getElementById('manual-domain').value.trim();
+    if (domain && !domains.includes(domain)) {
+      setDomains([...domains, domain]);
+      document.getElementById('manual-domain').value = '';
+    }
+  };
+
+  const removeDomain = (index) => {
+    const newDomains = domains.filter((_, i) => i !== index);
+    setDomains(newDomains);
+    if (results.length > 0) {
+      setResults(results.filter((_, i) => i !== index));
+    }
+  };
+
   const downloadResults = () => {
     if (results.length === 0) return;
-    
+
     const csvContent = [
-      ['Domain', 'Status Code', 'Status Message', 'Response Time (ms)', 'Timestamp'],
-      ...results.map(result => [
-        result.domain,
-        result.status,
-        getStatusInfo(result.status).message,
-        Math.round(result.responseTime),
-        new Date(result.timestamp).toLocaleString()
+      ['Domain', 'Status Code', 'Message', 'Response Time (s)', 'Category', 'Checked At'],
+      ...results.map(r => [
+        r.domain, 
+        r.status, 
+        r.message.replace(/[,]/g, ';'), // Replace commas to avoid CSV issues
+        r.response_time || 'N/A',
+        r.category || 'N/A',
+        r.timestamp
       ])
     ].map(row => row.join(',')).join('\n');
-    
+
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -197,250 +211,275 @@ const WebsiteStatusChecker = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Calculate summary stats
-  const summary = results.reduce((acc, result) => {
-    if (result.status >= 200 && result.status < 300) {
-      acc.active++;
-    } else {
-      acc.inactive++;
-    }
-    return acc;
-  }, { active: 0, inactive: 0 });
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <div className="container mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <div className="flex justify-center items-center mb-4">
-            <Globe className="w-12 h-12 text-blue-600 mr-3" />
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              Website Status Checker
-            </h1>
-          </div>
-          <p className="text-gray-600 text-lg max-w-2xl mx-auto">
-            Monitor your websites' uptime and performance. Upload domains in bulk or add them manually.
-          </p>
-        </div>
-
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Input Section */}
-          <div className="lg:col-span-1 space-y-6">
-            {/* File Upload */}
-            <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-              <h3 className="text-xl font-semibold mb-4 flex items-center">
-                <Upload className="w-5 h-5 mr-2 text-blue-600" />
-                Upload Domains
-              </h3>
-              
-              <div
-                className={`border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 ${
-                  dragActive 
-                    ? 'border-blue-500 bg-blue-50' 
-                    : 'border-gray-300 hover:border-gray-400'
-                }`}
-                onDragEnter={handleDrag}
-                onDragLeave={handleDrag}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-              >
-                <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600 mb-2">
-                  Drag & drop your CSV or Excel file here
-                </p>
-                <p className="text-sm text-gray-500 mb-4">
-                  Supports .csv, .xlsx, .xls files
-                </p>
-                <input
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  onChange={(e) => e.target.files[0] && handleFileUpload(e.target.files[0])}
-                  className="hidden"
-                  id="file-upload"
-                />
-                <label
-                  htmlFor="file-upload"
-                  className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
-                >
-                  <FileText className="w-4 h-4 mr-2" />
-                  Choose File
-                </label>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+      <div className="max-w-6xl mx-auto">
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
+            <div className="flex items-center gap-3">
+              <Globe className="w-8 h-8" />
+              <div>
+                <h1 className="text-3xl font-bold">Website Status Checker</h1>
+                <p className="text-blue-100 mt-1">Check multiple websites and domains for availability</p>
               </div>
             </div>
+          </div>
 
-            {/* Manual Entry */}
-            <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-              <h3 className="text-xl font-semibold mb-4">Add Domain Manually</h3>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="example.com"
-                  value={manualDomain}
-                  onChange={(e) => setManualDomain(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && addManualDomain()}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-                />
+          <div className="p-6">
+            {/* Server Connection Test */}
+            {/* <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <h3 className="text-sm font-medium text-yellow-800 mb-2">🔧 Server Connection & CORS Test</h3>
+              <p className="text-xs text-yellow-700 mb-2">Current API: {API_BASE_URL}</p>
+              <div className="space-x-2">
                 <button
-                  onClick={addManualDomain}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  onClick={async () => {
+                    try {
+                      const response = await fetch(`${API_BASE_URL}/`, { 
+                        method: 'GET',
+                        mode: 'cors'
+                      });
+                      alert(`Server Status: ${response.ok ? '✅ Connected' : '❌ Error ' + response.status}`);
+                    } catch (error) {
+                      if (error.message.includes('CORS')) {
+                        alert(`❌ CORS Error: The server needs to allow browser requests. Error: ${error.message}`);
+                      } else {
+                        alert(`❌ Cannot connect to server: ${error.message}`);
+                      }
+                    }
+                  }}
+                  className="px-3 py-1 bg-yellow-600 text-white text-xs rounded hover:bg-yellow-700"
                 >
-                  Add
+                  Test Connection
                 </button>
+                <button
+                  onClick={() => {
+                    const newUrl = prompt('Enter new API URL:', API_BASE_URL);
+                    if (newUrl) {
+                      // This is a demo - in real app you'd update state
+                      alert('In a real app, this would update the API URL. Current demo uses fixed URL.');
+                    }
+                  }}
+                  className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                >
+                  Change API URL
+                </button>
+              </div>
+              <div className="mt-2 text-xs text-yellow-700">
+                <strong>CORS Issue?</strong> Your server needs to allow browser requests. See solutions below.
+              </div>
+            </div> */}
+
+            {/* CORS Solutions */}
+            {/* <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h3 className="text-sm font-medium text-blue-800 mb-2">🛠️ CORS Solutions</h3>
+              <div className="text-xs text-blue-700 space-y-2">
+                <div><strong>Python Flask:</strong> Add <code className="bg-blue-100 px-1 rounded">pip install flask-cors</code> and <code className="bg-blue-100 px-1 rounded">CORS(app)</code></div>
+                <div><strong>Alternative:</strong> Use a browser extension like "CORS Unblock" for testing</div>
+                <div><strong>Production:</strong> Deploy both frontend and backend on same domain</div>
+              </div>
+            </div> */}
+
+            {/* Upload Section */}
+            <div className="mb-8">
+              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+                <Upload className="w-5 h-5" />
+                Add Domains to Check
+              </h2>
+              
+              <div className="grid md:grid-cols-2 gap-6">
+                {/* File Upload */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Upload CSV/Excel File
+                    </label>
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 transition-colors">
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls"
+                        onChange={handleFileUpload}
+                        disabled={uploadLoading}
+                        className="hidden"
+                        id="file-upload"
+                      />
+                      <label htmlFor="file-upload" className="cursor-pointer">
+                        {uploadLoading ? (
+                          <RefreshCw className="w-8 h-8 text-blue-500 mx-auto mb-2 animate-spin" />
+                        ) : (
+                          <FileText className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                        )}
+                        <p className="text-sm text-gray-600">
+                          {uploadLoading ? 'Processing file and checking websites... This may take several minutes for large files.' : 'Click to upload CSV or Excel file'}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Supported: .csv, .xlsx, .xls (Max 5MB)
+                          <br />
+                          File will be automatically processed and checked
+                          <br />
+                          Large files may take 5+ minutes to process
+                        </p>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Manual Entry */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Add Domain Manually
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        id="manual-domain"
+                        placeholder="e.g., google.com"
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        onKeyPress={(e) => e.key === 'Enter' && addManualDomain()}
+                      />
+                      <button
+                        onClick={addManualDomain}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
             {/* Domain List */}
             {domains.length > 0 && (
-              <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-xl font-semibold">Domains ({domains.length})</h3>
-                  <button
-                    onClick={() => setDomains([])}
-                    className="text-red-500 hover:text-red-700 transition-colors"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="max-h-40 overflow-y-auto space-y-1">
-                  {domains.map((domain, index) => (
-                    <div key={index} className="text-sm text-gray-600 bg-gray-50 px-3 py-1 rounded">
-                      {domain}
-                    </div>
-                  ))}
-                </div>
-                <button
-                  onClick={checkAllDomains}
-                  disabled={loading}
-                  className="w-full mt-4 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center justify-center"
-                >
-                  {loading ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                      Checking...
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Check All Domains
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Results Section */}
-          <div className="lg:col-span-2">
-            {/* Summary Stats */}
-            {results.length > 0 && (
-              <div className="grid md:grid-cols-3 gap-4 mb-6">
-                <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600">Total Sites</p>
-                      <p className="text-2xl font-bold text-gray-900">{results.length}</p>
-                    </div>
-                    <BarChart3 className="w-8 h-8 text-blue-600" />
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold mb-4">
+                  Domains ({domains.length})
+                </h3>
+                <div className="bg-gray-50 rounded-lg p-4 max-h-40 overflow-y-auto">
+                  <div className="space-y-2">
+                    {domains.map((domain, index) => (
+                      <div key={index} className="flex items-center justify-between bg-white px-3 py-2 rounded-md">
+                        <span className="text-sm">{domain}</span>
+                        <button
+                          onClick={() => removeDomain(index)}
+                          className="text-red-500 hover:text-red-700 text-sm"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600">Active Sites</p>
-                      <p className="text-2xl font-bold text-green-600">{summary.active}</p>
-                    </div>
-                    <CheckCircle className="w-8 h-8 text-green-600" />
-                  </div>
-                </div>
-                <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600">Inactive Sites</p>
-                      <p className="text-2xl font-bold text-red-600">{summary.inactive}</p>
-                    </div>
-                    <XCircle className="w-8 h-8 text-red-600" />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Results Table */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-              <div className="p-6 border-b border-gray-200">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-xl font-semibold">Status Results</h3>
-                  {results.length > 0 && (
+                
+                {/* Only show manual check button if we have manually added domains */}
+                {results.length === 0 && (
+                  <div className="mt-4">
                     <button
-                      onClick={downloadResults}
-                      className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                      onClick={checkBulkDomains}
+                      disabled={loading}
+                      className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                     >
-                      <Download className="w-4 h-4 mr-2" />
-                      Download Report
+                      {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
+                      {loading ? 'Checking...' : 'Check All Domains'}
                     </button>
-                  )}
-                </div>
-              </div>
-              
-              <div className="overflow-x-auto">
-                {results.length === 0 ? (
-                  <div className="p-12 text-center">
-                    <Globe className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500 text-lg">No results yet</p>
-                    <p className="text-gray-400">Upload domains and click "Check All Domains" to get started</p>
                   </div>
-                ) : (
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Domain</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Response Time</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Checked</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {results.map((result, index) => {
-                        const statusInfo = getStatusInfo(result.status);
-                        const StatusIcon = statusInfo.icon;
-                        
-                        return (
-                          <tr key={index} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm font-medium text-gray-900">{result.domain}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="flex items-center">
-                                <StatusIcon className={`w-4 h-4 mr-2 ${
-                                  statusInfo.type === 'success' ? 'text-green-500' :
-                                  statusInfo.type === 'warning' ? 'text-yellow-500' : 'text-red-500'
-                                }`} />
-                                <div>
-                                  <div className={`text-sm font-medium ${
-                                    statusInfo.type === 'success' ? 'text-green-800' :
-                                    statusInfo.type === 'warning' ? 'text-yellow-800' : 'text-red-800'
-                                  }`}>
-                                    {statusInfo.message}
-                                  </div>
-                                  <div className="text-xs text-gray-500">
-                                    Code: {result.status}
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              {Math.round(result.responseTime)}ms
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {new Date(result.timestamp).toLocaleString()}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
                 )}
               </div>
-            </div>
+            )}
+
+            {/* Summary */}
+            {results.length > 0 && (
+              <div className="mb-8">
+                <h3 className="text-lg font-semibold mb-4">Summary</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-green-50 border-l-4 border-green-500 p-4 rounded">
+                    <div className="flex items-center">
+                      <CheckCircle className="w-6 h-6 text-green-500 mr-2" />
+                      <div>
+                        <p className="text-sm text-green-700 font-medium">Active Sites</p>
+                        <p className="text-2xl font-bold text-green-800">{summary.active}</p>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                    <div className="flex items-center">
+                      <XCircle className="w-6 h-6 text-red-500 mr-2" />
+                      <div>
+                        <p className="text-sm text-red-700 font-medium">Errors</p>
+                        <p className="text-2xl font-bold text-red-800">{summary.errors}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="mt-4">
+                  <button
+                    onClick={downloadResults}
+                    className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    <Download className="w-5 h-5" />
+                    Download Report
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Results */}
+            {results.length > 0 && (
+              <div>
+                <h3 className="text-lg font-semibold mb-4">
+                  Results ({results.length} websites checked)
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse bg-white rounded-lg overflow-hidden shadow-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="text-left p-4 font-medium text-gray-700">Domain</th>
+                        <th className="text-left p-4 font-medium text-gray-700">Status</th>
+                        <th className="text-left p-4 font-medium text-gray-700">Message</th>
+                        <th className="text-left p-4 font-medium text-gray-700">Response Time</th>
+                        <th className="text-left p-4 font-medium text-gray-700">Category</th>
+                        <th className="text-left p-4 font-medium text-gray-700">Checked At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {results.map((result, index) => (
+                        <tr key={index} className="border-t border-gray-100 hover:bg-gray-50">
+                          <td className="p-4 font-medium">{result.domain}</td>
+                          <td className="p-4">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(result.status)}`}>
+                              {result.status}
+                            </span>
+                          </td>
+                          <td className="p-4">{result.message}</td>
+                          <td className="p-4 text-sm text-gray-600">
+                            {result.response_time ? `${result.response_time.toFixed(3)}s` : 'N/A'}
+                          </td>
+                          <td className="p-4">
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              result.category === 'active' ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'
+                            }`}>
+                              {result.category || 'N/A'}
+                            </span>
+                          </td>
+                          <td className="p-4 text-sm text-gray-600">{result.timestamp}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {domains.length === 0 && (
+              <div className="text-center py-12">
+                <Globe className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-600 mb-2">No domains added yet</h3>
+                <p className="text-gray-500">Upload a CSV/Excel file to automatically check websites, or add domains manually</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
